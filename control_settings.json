@@ -1,0 +1,6 @@
+{
+    "SYSTEM_ACTIVE": true,
+    "AUTO_BLOCK_ENABLED": true,
+    "SENSITIVITY": "CONSERVATIVE",
+    "SENSITIVITY_VALUE0": 50
+}
