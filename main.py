@@ -1720,7 +1720,7 @@ async def admin_login_form(
 
     print(f"[LOGIN ATTEMPT] IP={client_ip} FAILS={FAILED_COUNTER[client_ip]} GAP={time_gap}")
 
-    if username == ADMIN_USER and pwd_context.verify(password[:72], ADMIN_PASSWORD_HASHED)
+    if username == ADMIN_USER and pwd_context.verify(password[:72], ADMIN_PASSWORD_HASHED):
         FAILED_COUNTER.pop(client_ip, None)
         USER_TRACKER.pop(client_ip, None)
         LAST_ATTEMPT_TIME.pop(client_ip, None)
