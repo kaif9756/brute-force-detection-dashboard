@@ -1211,16 +1211,82 @@
 
   <div id="login-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2000; justify-content: center; align-items: center; display: none;">
     <div style="background: var(--card-bg); padding: 30px; width: 350px; border-radius: 8px; border: 2px solid var(--primary-color); box-shadow: 0 0 20px rgba(0, 188, 212, 0.5);">
-      <h3 style="color: var(--primary-color); text-align: center; margin-bottom: 20px;">🛡️ Admin Login</h3>
+      <h3 style="color: var(--primary-color); text-align: center; margin-bottom: 20px;">
+    🛡️ Security Authentication
+</h3>
 
-      <input type="text" id="login-username" placeholder="Username (e.g., kaif786)" required style="width: 95%; padding: 10px; margin-bottom: 15px; background: #333; color: var(--text-color); border: 1px solid #555;">
+<input type="email"
+    id="loginEmail"
+    placeholder="Email"
+    style="width:95%; padding:10px; margin-bottom:15px; background:#333; color:white; border:1px solid #555;">
 
-      <input type="password" id="login-password" placeholder="Password" required style="width: 95%; padding: 10px; margin-bottom: 20px; background: #333; color: var(--text-color); border: 1px solid #555;">
+<input type="password"
+    id="loginPassword"
+    placeholder="Password"
+    style="width:95%; padding:10px; margin-bottom:20px; background:#333; color:white; border:1px solid #555;">
 
-      <button onclick="handleAdminLogin()" style="width: 100%; padding: 12px; background: var(--success-color); color: var(--bg-color); border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">
-        Login & Unlock Controls
-      </button>
-      <p id="login-status" style="color: var(--danger-color); text-align: center; margin-top: 15px;"></p>
+<button onclick="loginUser()"
+    style="width:100%; padding:12px; background:var(--success-color); color:black; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">
+    Login
+</button>
+
+<br><br>
+
+<button onclick="showRegister()"
+    style="width:100%; padding:10px; background:var(--primary-color); color:black; border:none; border-radius:5px; cursor:pointer;">
+    Register
+</button>
+
+<br><br>
+
+<button onclick="showForgotPassword()"
+    style="width:100%; padding:10px; background:var(--warning-color); color:black; border:none; border-radius:5px; cursor:pointer;">
+    Forgot Password
+</button>
+
+<p id="login-status"
+   style="color:red; text-align:center; margin-top:15px;">
+</p>
+
+<div id="registerBox" style="display:none; margin-top:20px;">
+
+    <input type="text"
+        id="registerName"
+        placeholder="Full Name"
+        style="width:95%; padding:10px; margin-bottom:10px; background:#333; color:white; border:1px solid #555;">
+
+    <input type="email"
+        id="registerEmail"
+        placeholder="Email"
+        style="width:95%; padding:10px; margin-bottom:10px; background:#333; color:white; border:1px solid #555;">
+
+    <input type="password"
+        id="registerPassword"
+        placeholder="Password"
+        style="width:95%; padding:10px; margin-bottom:15px; background:#333; color:white; border:1px solid #555;">
+
+    <button onclick="registerUser()"
+        style="width:100%; padding:10px; background:#00bcd4; color:black; border:none; border-radius:5px;">
+        Create Account
+    </button>
+
+</div>
+
+<div id="forgotBox" style="display:none; margin-top:20px;">
+
+    <input type="email"
+        id="forgotEmail"
+        placeholder="Enter Email"
+        style="width:95%; padding:10px; margin-bottom:15px; background:#333; color:white; border:1px solid #555;">
+
+    <button onclick="forgotPassword()"
+        style="width:100%; padding:10px; background:#ffc107; color:black; border:none; border-radius:5px;">
+        Send Reset Link
+    </button>
+  </div>
+
+  </div>
+      
     </div>
   </div>
 
@@ -1343,8 +1409,8 @@
         dataLoopInterval = null;
       }
       isModalVisible = true;
-      document.getElementById("login-username").value = "";
-      document.getElementById("login-password").value = "";
+      document.getElementById("loginEmail").value = "";
+      document.getElementById("loginPassword").value = "";
       const loginModal = document.getElementById('login-modal');
       if (loginModal) {
         loginModal.style.display = 'flex';
@@ -2032,8 +2098,8 @@
 
 
     async function handleAdminLogin() {
-      const username = document.getElementById('login-username').value;
-      const password = document.getElementById('login-password').value;
+      const username = document.getElementById('loginEmail').value;
+      const password = document.getElementById('loginPassword').value;
       const statusElement = document.getElementById('login-status');
       if (!username || !password) {
         statusElement.textContent = 'Please enter both username and password.';
@@ -3375,6 +3441,109 @@ socket.onerror = function(error){
 socket.onclose = function () {
     console.log("❌ WebSocket Closed");
 };
+
+function showRegister() {
+    document.getElementById("registerBox").style.display = "block";
+}
+
+function showForgotPassword() {
+    document.getElementById("forgotBox").style.display = "block";
+}
+
+async function registerUser() {
+
+    const full_name =
+        document.getElementById("registerName").value;
+
+    const email =
+        document.getElementById("registerEmail").value;
+
+    const password =
+        document.getElementById("registerPassword").value;
+
+    const response = await fetch(
+        `${API_BASE}/register`,
+        {
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify({
+                full_name,
+                email,
+                password
+            })
+        }
+    );
+
+    const result = await response.json();
+
+    alert(result.message);
+}
+
+async function loginUser() {
+
+    const email =
+        document.getElementById("loginEmail").value;
+
+    const password =
+        document.getElementById("loginPassword").value;
+
+    const formData = new FormData();
+
+    formData.append("email", email);
+    formData.append("password", password);
+
+    const response = await fetch(
+        `${API_BASE}/login`,
+        {
+            method: "POST",
+            body: formData
+        }
+    );
+
+    const result = await response.json();
+
+    if(result.status === "success") {
+
+        localStorage.setItem(
+            "token",
+            result.token
+        );
+
+        alert("Login Success");
+
+        location.reload();
+
+    } else {
+
+        alert(result.message);
+    }
+}
+
+async function forgotPassword() {
+
+    const email =
+        document.getElementById("forgotEmail").value;
+
+    const formData = new FormData();
+
+    formData.append("email", email);
+
+    const response = await fetch(
+        `${API_BASE}/forgot-password`,
+        {
+            method: "POST",
+            body: formData
+        }
+    );
+
+    const result = await response.json();
+
+    alert(result.message);
+}
 
 </script>
 

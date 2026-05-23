@@ -18,7 +18,8 @@ import threading
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBasic, HTTPAuthorizationCredentials
 from jose import jwt
-from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect 
+from fastapi import FastAPI, Request, Form, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware 
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from datetime import datetime, timedelta
@@ -59,7 +60,19 @@ LAST_ATTEMPT_TIME = {}
 ALERT_SENT = set()
 
 app = FastAPI()
-connected_clients = []
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:8001",
+        "http://localhost:8001",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        "https://brute-force-detection-dashboard.onrender.com"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 BASE_DIR = os.path.dirname(__file__)
@@ -75,17 +88,6 @@ ADMIN_USER = "kaif786"
 AUTH_FILE = "admin_auth.json"
 ADMIN_PASSWORD_HASHED: str = ""
 TOTP_SECRET = pyotp.random_base32()
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5500", "http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 BASE_DIR = os.path.dirname(__file__)
 DB_PATH = os.path.join(BASE_DIR, "alert.db")
 
