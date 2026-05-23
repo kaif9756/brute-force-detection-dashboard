@@ -1300,7 +1300,7 @@
   <p id="no-alerts-msg" style="color: var(--muted-text); text-align: center; margin-top: 50px; display: none;">No current critical alerts.</p>
 
   <script>
-    const API_BASE = "http://127.0.0.1:8001";
+    const API_BASE = "https://brute-force-detection-dashboard.onrender.com";
     let map;
     let mapInitialized = false;
     let currentMarkers = [];
@@ -3343,7 +3343,9 @@ const activeToasts = new Set();
       }, 5000);
   }
 
-const socket = new WebSocket("ws://127.0.0.1:8001/ws");
+const socket = new WebSocket(
+  "wss://brute-force-detection-dashboard.onrender.com/ws"
+);
 
 socket.onopen = function () {
     console.log("✅ WebSocket Connected");
