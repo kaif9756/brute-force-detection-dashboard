@@ -389,7 +389,8 @@
 
     .toggle-track {
       position: relative;
-      width: 500px;
+      width: 100px;
+      max-width: 500px;  
       height: 7px;
       background-color: #333;
       border: none;
@@ -401,11 +402,11 @@
     .toggle-handle {
       position: absolute;
       width: 40px;
-      height: 25%;
+      height: 25px;
       border-radius: 50px;
       background-color: var(--card-bg);
       border: 4px solid var(--primary-color);
-      top: -10;
+      top: -10px;
       left: 0;
       transition: none;
       cursor: grab;
@@ -1209,7 +1210,7 @@
     </div>
   </div>
 
-  <div id="login-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2000; justify-content: center; align-items: center; display: none;">
+  <div id="login-modal">
     <div style="background: var(--card-bg); padding: 30px; width: 350px; border-radius: 8px; border: 2px solid var(--primary-color); box-shadow: 0 0 20px rgba(0, 188, 212, 0.5);">
       <h3 style="color: var(--primary-color); text-align: center; margin-bottom: 20px;">
     🛡️ Security Authentication
@@ -1491,6 +1492,9 @@
       listContent.innerHTML = '<p style="text-align: center; color: var(--primary-color);">Loading alerts...</p>';
       countSpan.textContent = '...';
       const currentHeader = ADMIN_AUTH_HEADER || localStorage.getItem('adminAuthHeader');
+      if (!currentHeader) {
+        return handleAuthFailure();
+      }
       const authHeaders = currentHeader ? {
         'Authorization': currentHeader
       } : {};
@@ -1522,7 +1526,10 @@
             let reasonSummary = "N/A";
             let statusText = alert.status.replace('_', ' ');
             try {
-              const safeJsonString = alert.reason.replace(/'/g, '"').replace(/None/g, 'null');
+              const safeReason = alert.reason || "{}";
+              const safeJsonString = safeReason
+                .replace(/'/g, '"')
+                .replace(/None/g, 'null');
               const reasonObj = JSON.parse(safeJsonString);
               const failedAttempts = reasonObj.failed_attempts_last_5min || '?';
               const distinctUsers = reasonObj.distinct_usernames_per_ip || '?';
@@ -1681,6 +1688,10 @@
         container.innerHTML = '<p style="color: var(--danger-color);">Login required to modify settings.</p>';
         return {};
       }
+      if (!currentHeader) {
+        return handleAuthFailure();
+      }
+      
       const authHeaders = {
         'Authorization': currentHeader
       };
@@ -2514,7 +2525,11 @@
 
         try {
 
-          const safeJsonString = alert.reason.replace(/'/g, '"').replace(/None/g, 'null');
+          const safeReason = alert.reason || "{}";
+          const safeJsonString = safeReason
+            .replace(/'/g, '"')
+            .replace(/None/g, 'null');
+
           const reasonObj = JSON.parse(safeJsonString);
           locData = reasonObj.location_data;
 
@@ -3393,7 +3408,7 @@ const activeToasts = new Set();
 
       toast.className = "toast";
 
-      toast.innerHTML = `
+      toast.textContent = `
           <div class="toast-title">${title}</div>
           <div class="toast-small">${message}</div>
       `;
@@ -3509,9 +3524,12 @@ async function loginUser() {
     if(result.status === "success") {
 
         localStorage.setItem(
-            "token",
-            result.token
+            "adminAuthHeader",
+            "Bearer " + result.token
         );
+
+        ADMIN_AUTH_HEADER =
+            "Bearer " + result.token;
 
         alert("Login Success");
 
