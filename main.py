@@ -82,7 +82,10 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 BLOCKED_IPS_FILE = "persistent_block.json"
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    schemes=["pbkdf2_sha256"],
+    deprecated="auto"
+)
 
 ADMIN_USER = "kaif786"
 AUTH_FILE = "admin_auth.json"
