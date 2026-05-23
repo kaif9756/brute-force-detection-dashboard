@@ -138,6 +138,7 @@ recent_critical_attacks: List[float] = []
 
 RECENT_ATTACKS_LOCK = Lock()
 reset_tokens: Dict[str, Dict[str, Any]] = {}
+forgot_password_tokens = {}
 blocked_ips: Dict[str, Dict[str, Any]] = {}
 BLOCKED_LOCK = Lock()
 country_attack_counter: Dict[str, int] = {}
@@ -154,6 +155,15 @@ class AttackInput(BaseModel):
 class PasswordResetInput(BaseModel):
     token: str
     new_password: str
+
+class UserPasswordReset(BaseModel):
+    token: str
+    new_password: str
+
+class RegisterInput(BaseModel):
+    full_name: str
+    email: str
+    password: str
 
 
 def get_client_ip(request: Request):
@@ -253,14 +263,23 @@ def initialize_db():
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute('''
-             CREATE TABLE IF NOT EXISTS alerts (
-                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                 ip_address TEXT NOT NULL,
-                 status TEXT NOT NULL,
-                 reason TEXT,
-                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-      ''')
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_address TEXT NOT NULL,
+                status TEXT NOT NULL,
+                reason TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+             ''')
+        c.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    full_name TEXT NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                ''')
         conn.commit()
         conn.close()
         print("[DB SETUP] Database initialized and table is ready at:", DB_PATH)
@@ -1027,6 +1046,131 @@ def trigger_attack_simulation(
 
     return {"status": "success", "attacks": results, "message": f"Successfully scheduled {len(results)} attack simulations."}
 
+@app.post("/forgot-password")
+def forgot_password(email: str = Form(...)):
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+
+        c = conn.cursor()
+
+        c.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (email,)
+        )
+
+        user = c.fetchone()
+
+        conn.close()
+
+        if not user:
+            return {
+                "status": "error",
+                "message": "Email not registered"
+            }
+
+        token = secrets.token_urlsafe(32)
+
+        forgot_password_tokens[token] = {
+            "email": email,
+            "expiry": time.time() + 3600
+        }
+
+        reset_link = f"https://brute-force-detection-dashboard.onrender.com/reset-password-page?token={token}"
+
+        msg = EmailMessage()
+
+        msg["Subject"] = "Password Reset Request"
+        msg["From"] = SMTP_USER
+        msg["To"] = email
+
+        msg.set_content(f"""
+Hello,
+
+We received a password reset request.
+
+Click the link below to reset your password:
+
+{reset_link}
+
+This link expires in 1 hour.
+
+If you did not request this, ignore this email.
+""")
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+            smtp.starttls()
+            smtp.login(SMTP_USER, SMTP_APP_PASSWORD)
+            smtp.send_message(msg)
+
+        return {
+            "status": "success",
+            "message": "Password reset email sent"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+    
+@app.post("/reset-user-password")
+def reset_user_password(data: UserPasswordReset):
+
+    try:
+
+        if data.token not in forgot_password_tokens:
+            return {
+                "status": "error",
+                "message": "Invalid token"
+            }
+
+        token_data = forgot_password_tokens[data.token]
+
+        if time.time() > token_data["expiry"]:
+            del forgot_password_tokens[data.token]
+
+            return {
+                "status": "error",
+                "message": "Token expired"
+            }
+
+        email = token_data["email"]
+
+        new_hash = pwd_context.hash(
+            data.new_password[:72]
+        )
+
+        conn = sqlite3.connect(DB_PATH)
+
+        c = conn.cursor()
+
+        c.execute(
+            """
+            UPDATE users
+            SET password = ?
+            WHERE email = ?
+            """,
+            (new_hash, email)
+        )
+
+        conn.commit()
+        conn.close()
+
+        del forgot_password_tokens[data.token]
+
+        return {
+            "status": "success",
+            "message": "Password reset successful"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
 
 @app.post("/reset_password")
 def reset_password(data: PasswordResetInput):
@@ -1061,6 +1205,72 @@ def reset_password(data: PasswordResetInput):
 
     except Exception as e:
         return {"status": "error", "message": f"Internal server error during reset process: {e}"}
+    
+
+@app.get("/reset-password-page", response_class=HTMLResponse)
+def reset_password_page(token: str):
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Reset Password</title>
+    </head>
+
+    <body style="font-family: Arial; background:#111; color:white; padding:40px;">
+
+        <h2>Reset Your Password</h2>
+
+        <input
+            type="password"
+            id="newPassword"
+            placeholder="Enter new password"
+            style="padding:10px; width:300px;"
+        />
+
+        <br><br>
+
+        <button onclick="resetPassword()"
+            style="padding:10px 20px;">
+            Reset Password
+        </button>
+
+        <p id="msg"></p>
+
+        <script>
+
+        async function resetPassword() {{
+
+            const password =
+                document.getElementById("newPassword").value;
+
+            const response = await fetch(
+                "/reset-user-password",
+                {{
+                    method: "POST",
+
+                    headers: {{
+                        "Content-Type": "application/json"
+                    }},
+
+                    body: JSON.stringify({{
+                        token: "{token}",
+                        new_password: password
+                    }})
+                }}
+            );
+
+            const result = await response.json();
+
+            document.getElementById("msg").innerHTML =
+                result.message;
+        }}
+
+        </script>
+
+    </body>
+    </html>
+    """
 
 
 @app.get("/reset_password", response_class=HTMLResponse)
@@ -1668,6 +1878,52 @@ def verify_2fa(code: str = Form(...)):
         detail="Invalid OTP"
     )
 
+@app.post("/register")
+def register_user(data: RegisterInput):
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        c.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (data.email,)
+        )
+
+        existing = c.fetchone()
+
+        if existing:
+            conn.close()
+            return {
+                "status": "error",
+                "message": "Email already registered"
+            }
+
+        hashed_password = pwd_context.hash(data.password[:72])
+
+        c.execute("""
+            INSERT INTO users (full_name, email, password)
+            VALUES (?, ?, ?)
+        """, (
+            data.full_name,
+            data.email,
+            hashed_password
+        ))
+
+        conn.commit()
+        conn.close()
+
+        return {
+            "status": "success",
+            "message": "Registration successful"
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
 @app.post("/admin/login")
 def admin_login(
     request: Request,
@@ -1701,6 +1957,58 @@ def admin_login(
         content={"detail": "Not authenticated"},
         headers={}
     )
+
+@app.post("/login")
+def user_login(
+    email: str = Form(...),
+    password: str = Form(...)
+):
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+
+        c = conn.cursor()
+
+        c.execute(
+            "SELECT * FROM users WHERE email = ?",
+            (email,)
+        )
+
+        user = c.fetchone()
+
+        conn.close()
+
+        if not user:
+            return {
+                "status": "error",
+                "message": "User not found"
+            }
+
+        stored_password = user["password"]
+
+        if not pwd_context.verify(password[:72], stored_password):
+            return {
+                "status": "error",
+                "message": "Invalid password"
+            }
+
+        token = create_token(email)
+
+        return {
+            "status": "success",
+            "token": token,
+            "user": {
+                "name": user["full_name"],
+                "email": user["email"]
+            }
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.post("/admin/login-form")
 async def admin_login_form(
