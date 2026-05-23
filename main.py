@@ -1682,8 +1682,7 @@ def admin_login(
     """
 
     if username is not None and password is not None:
-        if username == ADMIN_USER and pwd_context.verify(password[:72], ADMIN_PASSWORD_HASHED)(password, ADMIN_PASSWORD_HASHED):
-            token = create_token(username)
+        if username == ADMIN_USER and pwd_context.verify(password[:72], ADMIN_PASSWORD_HASHED):
             return {"token": token}
         else:
             return JSONResponse(
