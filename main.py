@@ -1047,7 +1047,7 @@ def reset_password(data: PasswordResetInput):
 
     try:
         email = info["email"]
-        new_hashed_password = pwd_context.hash(data.new_password)
+        new_hashed_password = pwd_context.hash(data.new_password[:72])
         with open(AUTH_FILE, "w") as f:
             json.dump({"username": ADMIN_USER,
                       "password_hash": new_hashed_password}, f)
@@ -1682,7 +1682,7 @@ def admin_login(
     """
 
     if username is not None and password is not None:
-        if username == ADMIN_USER and pwd_context.verify(password, ADMIN_PASSWORD_HASHED):
+        if username == ADMIN_USER and pwd_context.verify(password[:72], ADMIN_PASSWORD_HASHED)(password, ADMIN_PASSWORD_HASHED):
             token = create_token(username)
             return {"token": token}
         else:
@@ -1721,7 +1721,7 @@ async def admin_login_form(
 
     print(f"[LOGIN ATTEMPT] IP={client_ip} FAILS={FAILED_COUNTER[client_ip]} GAP={time_gap}")
 
-    if username == ADMIN_USER and pwd_context.verify(password, ADMIN_PASSWORD_HASHED):
+    if username == ADMIN_USER and pwd_context.verify(password[:72], ADMIN_PASSWORD_HASHED)
         FAILED_COUNTER.pop(client_ip, None)
         USER_TRACKER.pop(client_ip, None)
         LAST_ATTEMPT_TIME.pop(client_ip, None)
