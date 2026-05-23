@@ -382,7 +382,7 @@ def load_admin_hash_on_startup():
                 try:
 
                     pwd_context.verify(
-                        "dummy-check-password-should-fail", file_hash)
+                        "dummy-check-password-should-fail"[:72], file_hash)
                 except Exception as verify_e:
                     print(
                         f"[AUTH WARNING] Existing hash invalid/unrecognized: {verify_e}. Recreating auth file with default password.")
