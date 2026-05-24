@@ -44,6 +44,9 @@ import requests
 
 load_dotenv()
 JWT_SECRET = os.getenv("JWT_SECRET")
+
+if not JWT_SECRET:
+    raise Exception("JWT_SECRET missing in environment variables")
 JWT_ALGO = os.getenv("JWT_ALGO", "HS256")
 
 DEMO_TTL_SECONDS = int(os.getenv("DEMO_TTL_SECONDS", str(48 * 3600)))
@@ -100,6 +103,8 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_APP_PASSWORD = os.getenv("SMTP_APP_PASSWORD")
+if not SMTP_USER or not SMTP_APP_PASSWORD:
+    print("[EMAIL WARNING] SMTP credentials missing.")
 
 GEOIP_DB_PATH = os.path.join(BASE_DIR, "GeoLite2-City.mmdb")
 GEOIP_READER = None
