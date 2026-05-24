@@ -7,7 +7,6 @@ import secrets
 import smtplib
 import sqlite3
 import json
-import geoip2.database
 import geoip2.errors
 import geoip2.database 
 import copy
@@ -24,7 +23,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from datetime import datetime, timedelta
 from fastapi import HTTPException
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from starlette.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, Query, Request, BackgroundTasks, UploadFile, File
@@ -60,6 +58,7 @@ LAST_ATTEMPT_TIME = {}
 ALERT_SENT = set()
 
 app = FastAPI()
+connected_clients = []
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -78,7 +77,10 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(__file__)
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend", "public")
 
-app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+if os.path.exists(FRONTEND_DIR):
+    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+else:
+    print("[WARNING] Frontend static directory not found.")
 
 BLOCKED_IPS_FILE = "persistent_block.json"
 
@@ -87,7 +89,7 @@ pwd_context = CryptContext(
     deprecated="auto"
 )
 
-ADMIN_USER = "kaif786"
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
 AUTH_FILE = "admin_auth.json"
 ADMIN_PASSWORD_HASHED: str = ""
 TOTP_SECRET = pyotp.random_base32()
@@ -99,13 +101,14 @@ SMTP_PORT = 587
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_APP_PASSWORD = os.getenv("SMTP_APP_PASSWORD")
 
-print("[DEBUG] JWT_SECRET =", JWT_SECRET)
-print("[DEBUG] SMTP_USER =", SMTP_USER)
-
 GEOIP_DB_PATH = os.path.join(BASE_DIR, "GeoLite2-City.mmdb")
 GEOIP_READER = None
-asn_reader = geoip2.database.Reader("GeoLite2-ASN.mmdb")
 
+try:
+    asn_reader = geoip2.database.Reader("GeoLite2-ASN.mmdb")
+except Exception as e:
+    print("[ASN WARNING]", e)
+    asn_reader = None
 try:
     if not os.path.exists(GEOIP_DB_PATH):
         raise FileNotFoundError(
@@ -241,9 +244,10 @@ def get_ip_details(ip):
         pass
 
     try:
-        asn_res = asn_reader.asn(ip)
-        result["asn"] = asn_res.autonomous_system_number
-        result["isp"] = asn_res.autonomous_system_organization
+        if asn_reader:
+            asn_res = asn_reader.asn(ip)
+            result["asn"] = asn_res.autonomous_system_number
+            result["isp"] = asn_res.autonomous_system_organization
 
         vpn_keywords = [
             "VPN", "Hosting", "Cloud",
@@ -371,7 +375,7 @@ def load_admin_hash_on_startup():
     """Loads the admin hash from persistent storage or initializes it, setting the GLOBAL variable."""
     global ADMIN_PASSWORD_HASHED
 
-    initial_plain_password = "mkaif@9900"
+    initial_plain_password = os.getenv("DEFAULT_ADMIN_PASSWORD")
     default_hash = pwd_context.hash(initial_plain_password)
 
     if os.path.exists(AUTH_FILE):
@@ -436,7 +440,7 @@ def authenticate_admin(credentials: HTTPBasicCredentials = Depends(security)):
 
     try:
         is_correct_password = pwd_context.verify(
-            credentials.password, LATEST_HASH)
+            credentials.password[:72], LATEST_HASH)
     except Exception as e:
         print(
             f"[AUTH ERROR] Password verification failed due to invalid hash: {e}")
@@ -642,43 +646,57 @@ def get_system_metrics() -> dict:
 
 
 def block_ip(ip: str, reason: dict):
-    """Block IP on Windows firewall (requires Admin)"""
+
+    import platform
 
     rule_name = f"Block-{ip}-{int(time.time())}"
-    cmd = [
-        "netsh", "advfirewall", "firewall", "add", "rule",
-        f'name={rule_name}', "dir=in", "interface=any", "action=block", f"remoteip={ip}"
-    ]
-    print("DEBUG: About to run:", " ".join(cmd))
-    try:
-        subprocess.run(cmd, capture_output=True, text=True, shell=False)
-        print(f"[ALERT] {ip} blocked successfully (rule={rule_name}).")
-    except Exception as e:
-        print(f"[ERROR] Error blocking IP {ip}: {e}")
-
-    unblock_time = time.time() + DEMO_TTL_SECONDS
-    blocked_ips[ip] = {
-        "reason": reason,
-        "time": time.time(),
-        "unblock_time": unblock_time,
-        "rule": rule_name}
 
     try:
-        log_entry = {
-            "timestamp": time.time(),
-            "ip": ip,
-            "rule": rule_name,
-            "reason_summary": {
-                "failed_attempts_last_5min": reason.get("failed_attempts_last_5min", "N/A"),
-                "distinct_usernames_per_ip": reason.get("distinct_usernames_per_ip", "N/A")
-            }
+
+        if platform.system() == "Windows":
+
+            cmd = [
+                "netsh",
+                "advfirewall",
+                "firewall",
+                "add",
+                "rule",
+                f'name={rule_name}',
+                "dir=in",
+                "interface=any",
+                "action=block",
+                f"remoteip={ip}"
+            ]
+
+            subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                shell=False
+            )
+
+            print(f"[WINDOWS BLOCK] {ip} blocked.")
+
+        else:
+
+            print(
+                f"[SIMULATION MODE] Linux/Render detected. Simulated block for {ip}"
+            )
+
+        unblock_time = time.time() + DEMO_TTL_SECONDS
+
+        blocked_ips[ip] = {
+            "reason": reason,
+            "time": time.time(),
+            "unblock_time": unblock_time,
+            "rule": rule_name
         }
-        with open("blocked_ips.log", "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
-    except Exception as e:
-        print(f"[WARN] Could not write to log: {e}")
 
-    save_blocked_ips()
+        save_blocked_ips()
+
+    except Exception as e:
+
+        print(f"[BLOCK ERROR] {e}")
 
 
 def block_ip_sync(ip: str, reason: dict):
@@ -733,8 +751,8 @@ def generate_reset_link(user_email: str) -> str:
     expiry = int(time.time()) + (3 * 3600)
     reset_tokens[token] = {"email": user_email, "expiry": expiry}
 
-    SERVER_IP = "192.168.56.1"   # ya jo tumhara backend IP ho
-    link = f"http://{SERVER_IP}:8001/reset_password?token={token}"
+    BASE_URL = "https://brute-force-detection-dashboard.onrender.com"
+    link = f"{BASE_URL}/reset_password?token={token}"
 
     print("[DEBUG] Reset link generated:", link)
     return link
@@ -1001,7 +1019,7 @@ def trigger_attack_simulation(
 ):
     results = []
 
-    MY_REAL_EMAIL = "kaifmalik9688@gmail.com"
+    MY_REAL_EMAIL = os.getenv("ADMIN_EMAIL", SMTP_USER)
 
     for i in range(num_attacks):
         ip = generate_random_ip()
@@ -1321,7 +1339,7 @@ def get_reset_form(token: str = Query(..., description="Secure reset token")):
 
                 try {{
                     // 💡 NOTE: Yahaan hum POST request bhej rahe hain, jo backend expect karta hai
-                    const response = await fetch('http://127.0.0.1:8001/reset_password', {{
+                    const response = await fetch('/reset_password', {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
                         body: JSON.stringify({{ token: token, new_password: newPassword }})
@@ -1380,29 +1398,45 @@ def get_dashboard_metrics(username: str = Depends(soft_token)) -> dict:
 def unblock_ip(ip_address: str, username: str = Depends(verify_token)):
     """Admin API to remove a specific IP from the Windows Firewall."""
 
-    command_list = [
-        "netsh", "advfirewall", "firewall", "delete", "rule",
-        f"remoteip={ip_address}"
-    ]
+    import platform
 
     try:
-        result = subprocess.run(
-            command_list,
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding='latin-1'
-        )
 
-        output = result.stdout.lower() if result.stdout else ""
-        error = result.stderr.lower() if result.stderr else ""
+        if platform.system() == "Windows":
 
-        is_successful = (
-            result.returncode == 0 or
-            result.returncode == 1 or
-            "no rules match" in output or
-            "no rules match" in error
-        )
+            command_list = [
+                "netsh",
+                "advfirewall",
+                "firewall",
+                "delete",
+                "rule",
+                f"remoteip={ip_address}"
+            ]
+
+            result = subprocess.run(
+                command_list,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding='latin-1'
+            )
+
+            output = result.stdout.lower() if result.stdout else ""
+            error = result.stderr.lower() if result.stderr else ""
+
+            is_successful = (
+                result.returncode == 0 or
+                result.returncode == 1 or
+                "no rules match" in output or
+                "no rules match" in error
+            )
+
+        else:
+
+            print(f"[SIMULATION MODE] Unblock simulated for {ip_address}")
+
+            is_successful = True
+            error = ""
 
         if is_successful:
 
@@ -1423,26 +1457,42 @@ def unblock_ip(ip_address: str, username: str = Depends(verify_token)):
                 deleted_key = True
 
             if not deleted_key:
-                for key, _ in blocked_ips.items():
+
+                for key in list(blocked_ips.keys()):
+
                     if key.startswith(ip_address) and '/' in key:
+
                         print(
-                            f"[UNBLOCK: SMART MATCH] Found CIDR block {key} for plain IP {ip_address}")
+                            f"[UNBLOCK: SMART MATCH] Found CIDR block {key} for plain IP {ip_address}"
+                        )
+
                         del blocked_ips[key]
+
                         deleted_key = True
+
                         break
 
             if deleted_key:
+
                 print(
-                    f"[UNBLOCK SUCCESS] IP {ip_address} removed from list. (KPI Updated)")
-                return {"status": "success", "message": f"IP {ip_address} unblocked successfully."}
+                    f"[UNBLOCK SUCCESS] IP {ip_address} removed from list."
+                )
+
+                return {
+                    "status": "success",
+                    "message": f"IP {ip_address} unblocked successfully."
+                }
+
             else:
-                print(
-                    f"[UNBLOCK WARNING] IP {ip_address} removed from list. (KPI Updated)")
-                return {"status": "success", "message": f"IP {ip_address} unblocked successfully (list entry missing)."}
+
+                return {
+                    "status": "success",
+                    "message": f"IP {ip_address} unblocked successfully (list entry missing)."
+                }
 
         else:
-            error_detail = error if error else f"Exit Status {result.returncode} returned."
-            print(f"[UNBLOCK FAILED] Detail: {error_detail}")
+
+            error_detail = error if error else "Unknown firewall error."
 
             return {
                 "status": "error",
@@ -1450,8 +1500,11 @@ def unblock_ip(ip_address: str, username: str = Depends(verify_token)):
             }
 
     except Exception as e:
-        return {"status": "error", "message": f"Critical Error during unblock: {str(e)}"}
 
+        return {
+            "status": "error",
+            "message": f"Critical Error during unblock: {str(e)}"
+        }
 
 @app.get("/admin/alerts")
 def get_recent_alerts(limit: int = 20, username: str = Depends(soft_token)):
@@ -1485,11 +1538,30 @@ def bulk_unblock_ips(ip_list_data: IPList, username: str = Depends(strict_token
 
     for ip_address in ip_list_data.ips:
         try:
-            command_list = [
-                "netsh", "advfirewall", "firewall", "delete", "rule",
-                f"remoteip={ip_address}"
-            ]
-            subprocess.run(command_list, check=False, capture_output=True)
+            import platform
+
+            if platform.system() == "Windows":
+
+                command_list = [
+                    "netsh",
+                    "advfirewall",
+                    "firewall",
+                    "delete",
+                    "rule",
+                    f"remoteip={ip_address}"
+                ]
+
+                subprocess.run(
+                    command_list,
+                    check=False,
+                    capture_output=True
+                )
+
+            else:
+
+                print(
+                    f"[SIMULATION MODE] Bulk unblock simulated for {ip_address}"
+                )
 
             if ip_address in blocked_ips:
                 del blocked_ips[ip_address]
@@ -1645,53 +1717,84 @@ def get_active_rules(username: str = Depends(strict_token)):
 
 
 @app.post("/admin/action/block_range")
-def block_ip_range(cidr_range: str = Query(..., description="E.g., 10.0.0.0/24"), username: str = Depends(verify_token)):
-    """Blocks an entire CIDR IP range on the Windows Firewall."""
+def block_ip_range(
+    cidr_range: str = Query(..., description="E.g., 10.0.0.0/24"),
+    username: str = Depends(verify_token)
+):
+    """Blocks an entire CIDR IP range."""
+
+    import platform
 
     try:
+
         rule_name = f"ADMIN_BLOCK_{cidr_range.replace('.', '_').replace('/', '_')}"
 
-        cmd = [
-            "netsh", "advfirewall", "firewall", "add", "rule",
-            f'name="{rule_name}"',
-            "dir=in",
-            "interface=any",
-            "action=block",
-            f"remoteip={cidr_range}"
-        ]
+        if platform.system() == "Windows":
 
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding='latin-1',
-        )
+            cmd = [
+                "netsh",
+                "advfirewall",
+                "firewall",
+                "add",
+                "rule",
+                f'name="{rule_name}"',
+                "dir=in",
+                "interface=any",
+                "action=block",
+                f"remoteip={cidr_range}"
+            ]
+
+            result = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding='latin-1',
+            )
+
+            print(
+                f"[BLOCK SUCCESS] Rule added: {rule_name}. Output: {result.stdout.strip()}"
+            )
+
+        else:
+
+            print(
+                f"[SIMULATION MODE] CIDR block simulated for {cidr_range}"
+            )
 
         global blocked_ips
+
         blocked_ips[cidr_range] = {
             "reason": "Admin Manual Block",
             "time": time.time(),
             "rule": rule_name
         }
 
-        print(
-            f"[BLOCK SUCCESS] Rule added: {rule_name}. Output: {result.stdout.strip()}")
+        save_blocked_ips()
 
-        return {"status": "success", "message": f"Successfully blocked CIDR range: {cidr_range}", "rule": rule_name}
+        return {
+            "status": "success",
+            "message": f"Successfully blocked CIDR range: {cidr_range}",
+            "rule": rule_name
+        }
 
     except subprocess.CalledProcessError as e:
-        error_output = e.stderr.strip() if e.stderr else "Unknown netsh error."
-        print(f"[BLOCK ERROR] System Error: {error_output}")
+
+        error_output = e.stderr.strip() if e.stderr else "Unknown firewall error."
+
+        print(f"[BLOCK ERROR] {error_output}")
 
         return {
             "status": "error",
-            "message": f"Block Failed: Check Admin. Detail: {error_output}"
+            "message": f"Block Failed: {error_output}"
         }
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
 
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.get("/admin/action/export_logs")
 def export_logs(username: str = Depends(verify_token)):
@@ -1833,21 +1936,48 @@ def activate_emergency_lock(username: str = Depends(strict_token)):
 @app.get("/admin/verify_session")
 def verify_session(authorization: str = Header(None)):
     """Verifies if the Authorization header is valid."""
+
     if not authorization:
         raise HTTPException(
-            status_code=401, detail="Missing Authorization header")
+            status_code=401,
+            detail="Missing Authorization header"
+        )
+
     auth = authorization.strip()
+
     if auth.lower().startswith("basic"):
         token = auth.split(" ", 1)[1]
-    elif auth.lower().startswith("Bearer "):
+
+    elif auth.lower().startswith("bearer "):
         token = auth.split(" ", 1)[1]
+
     else:
         raise HTTPException(
-            status_code=401, detail="Invalid Authorization format")
-    return {"status": "ok", "message": "Session still valid"}
+            status_code=401,
+            detail="Invalid Authorization format"
+        )
 
+    try:
 
-from fastapi.responses import JSONResponse
+        jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGO]
+        )
+
+    except Exception as e:
+
+        print("[VERIFY SESSION ERROR]", e)
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+    return {
+        "status": "ok",
+        "message": "Session still valid"
+    }
 
 @app.get("/generate-2fa")
 def generate_2fa():
@@ -1887,7 +2017,7 @@ def verify_2fa(code: str = Form(...)):
 def register_user(data: RegisterInput):
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         c = conn.cursor()
 
         c.execute(
@@ -1944,7 +2074,8 @@ def admin_login(
 
     if username is not None and password is not None:
         if username == ADMIN_USER and pwd_context.verify(password[:72], ADMIN_PASSWORD_HASHED):
-            return {"token": token}
+                token = create_token(username)
+                return {"token": token}
         else:
             return JSONResponse(
                 status_code=401,
@@ -1953,7 +2084,7 @@ def admin_login(
             )
 
     if credentials:
-        if credentials.username == ADMIN_USER and pwd_context.verify(credentials.password, ADMIN_PASSWORD_HASHED):
+        if credentials.username == ADMIN_USER and pwd_context.verify(credentials.password[:72], ADMIN_PASSWORD_HASHED):
             token = create_token(credentials.username)
             return {"token": token}
 
@@ -2057,8 +2188,10 @@ async def admin_login_form(
         }
 
         try:
+            BASE_URL = "https://brute-force-detection-dashboard.onrender.com"
+
             requests.post(
-                "http://127.0.0.1:8001/predict",
+                f"{BASE_URL}/predict",
                 json=payload,
                 headers={"X-Forwarded-For": client_ip},
                 timeout=3
@@ -2121,12 +2254,36 @@ def auto_unblock_cleanup_task():
         if unblock_time and now > unblock_time:
             print(f"[AUTO-UNBLOCK] {ip} expired.Removing firewall rule.")
             try:
-                subprocess.run(
-                    ["netsh", "advfirewall", "firewall",
-                        "delete", "rule", f"remoteip={ip}"],
-                    check=False, capture_output=True, text=True, shell=(os.name == "nt")
-                )
+
+                import platform
+
+                if platform.system() == "Windows":
+
+                    subprocess.run(
+                        [
+                            "netsh",
+                            "advfirewall",
+                            "firewall",
+                            "delete",
+                            "rule",
+                            f"remoteip={ip}"
+                        ],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        shell=False
+                    )
+
+                    print(f"[WINDOWS AUTO-UNBLOCK] {ip}")
+
+                else:
+
+                    print(
+                        f"[SIMULATION MODE] Auto-unblock simulated for {ip}"
+                    )
+
             except Exception as e:
+
                 print(f"[WARN] Auto-unblock failed for {ip}: {e}")
             del blocked_ips[ip]
             removed.append(ip)
@@ -2219,7 +2376,7 @@ def load_control_settings_from_disk():
             with open("control_settings.json", "r") as f:
                 saved = json.load(f)
                 saved["SYSTEM_ACTIVE"] = True
-                CONTROL_SETTING.update(json.load(f))
+                CONTROL_SETTING.update(saved)
             print("[PERSIST] Control settings loaded from disk ✅")
 
     except Exception as e:
@@ -2282,4 +2439,4 @@ if __name__ == "__main__":
     print("[SYSTEM] All modules initialized. Automation and Security Engine online ✅")
     print("🚀 FastAPI Backend is starting...")
     print("📍 visit: http://127.0.0.1:8001/docs or /redoc for API reference.")
-    uvicorn.run(app, host="127.0.0.1", port=8001, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8001, reload=True)
