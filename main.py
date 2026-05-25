@@ -765,6 +765,12 @@ def generate_reset_link(user_email: str) -> str:
 
 def send_alert_email(user_email: str, ip: str, reason: dict, reset_link: str):
     """Send email using SMTP with STARTTLS with professional formatting."""
+        
+    print("========== EMAIL DEBUG ==========")
+    print("SMTP_USER:", SMTP_USER)
+    print("SMTP PASS EXISTS:", bool(SMTP_APP_PASSWORD))
+    print("Recipient:", user_email)
+    print("=================================")
 
     if not CONTROL_SETTING["SYSTEM_ACTIVE"]:
         print(
@@ -2334,8 +2340,10 @@ def daily_report_task():
         msg.set_content(report)
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
             smtp.starttls()
+            print("[EMAIL DEBUG] Trying SMTP login...")
             smtp.login(SMTP_USER, SMTP_APP_PASSWORD)
             smtp.send_message(msg)
+            print("[EMAIL SUCCESS] Email sent successfully")
         print(
             f"[AUTOMATION] Daily report emailed successfully to {admin_email}")
     except Exception as e:
