@@ -2193,18 +2193,32 @@ async def admin_login_form(
         }
 
         try:
-            BASE_URL = "https://brute-force-detection-dashboard.onrender.com"
-
-            requests.post(
-                f"{BASE_URL}/predict",
-                json=payload,
-                headers={"X-Forwarded-For": client_ip},
-                timeout=3
+            location_data = get_ip_details(client_ip)
+            status = "CRITICAL_ATTACK"
+            reason = {
+                "failed_attempts_last_5min": FAILED_COUNTER[client_ip],
+                "distinct_usernames_per_ip": len(USER_TRACKER[client_ip]),
+                "time_between_attempts": time_gap,
+                "location_data": location_data
+            }
+            reset_link = generate_reset_link(
+                "kaifmalik9688@gmail.com"
+            )
+            send_alert_email(
+                "kaifmalik9688@gmail.com",
+                client_ip,
+                reason,
+                reset_link
+            )
+            log_alert_to_db(
+                client_ip,
+                status,
+                reason
             )
             ALERT_SENT.add(client_ip)
-            print(f"[ALERT TRIGGERED] Predict + Email sent for IP {client_ip}")
+            print(f"[ALERT TRIGGERED] Email sent for IP {client_ip}")
         except Exception as e:
-            print("[PREDICT ERROR]", e)
+            print("[ALERT ERROR]", e)
 
     return JSONResponse(
         status_code=200,
@@ -2386,6 +2400,26 @@ def load_control_settings_from_disk():
 
     except Exception as e:
         print(f"[WARN] Could not load control_settings.json: {e}")
+
+@app.get("/test-email")
+def test_email():
+
+    send_alert_email(
+        "kaifmalik9688@gmail.com",
+        "1.1.1.1",
+        {
+            "failed_attempts_last_5min": 10,
+            "distinct_usernames_per_ip": 2,
+            "time_between_attempts": 0.1,
+            "location_data": {
+                "country": "Test",
+                "city": "Test City"
+            }
+        },
+        "https://google.com"
+    )
+
+    return {"status": "Email test triggered"}
 
 
 @app.on_event("startup")
