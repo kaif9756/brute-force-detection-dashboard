@@ -1662,7 +1662,7 @@ def get_report(username: str = Depends(soft_token)):
     )
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def serve_dashboard():
     return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
 
